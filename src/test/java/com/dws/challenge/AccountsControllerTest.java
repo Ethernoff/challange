@@ -1,16 +1,10 @@
 package com.dws.challenge;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
-
-import java.math.BigDecimal;
-
 import com.dws.challenge.domain.Account;
+import com.dws.challenge.dto.TransferOperation;
 import com.dws.challenge.service.AccountsService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +15,16 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.test.context.web.WebAppConfiguration;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 @ExtendWith(SpringExtension.class)
 @SpringBootTest
@@ -34,6 +38,9 @@ class AccountsControllerTest {
 
   @Autowired
   private WebApplicationContext webApplicationContext;
+
+  @Autowired
+  private ObjectMapper objectMapper;
 
   @BeforeEach
   void prepareMockMvc() {
@@ -101,5 +108,63 @@ class AccountsControllerTest {
       .andExpect(status().isOk())
       .andExpect(
         content().string("{\"accountId\":\"" + uniqueAccountId + "\",\"balance\":123.45}"));
+  }
+
+  @Test
+  void emptyAccountTransfer() throws Exception {
+    var operation = new TransferOperation(null, null, new BigDecimal(50));
+
+    this.mockMvc.perform(post("/v1/accounts/transfer").contentType(MediaType.APPLICATION_JSON)
+            .content(asJson(operation))).andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void notExistedAccountTransfer() throws Exception {
+    var operation = new TransferOperation("123", "123", new BigDecimal(50));
+
+    this.mockMvc.perform(post("/v1/accounts/transfer").contentType(MediaType.APPLICATION_JSON)
+            .content(asJson(operation))).andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void negativeTransferAmount() throws Exception {
+    var from = createAccount(new BigDecimal(100));
+    var to = createAccount(new BigDecimal(50));
+    var operation = new TransferOperation(from.getAccountId(), to.getAccountId(), new BigDecimal(-1));
+
+    this.mockMvc.perform(post("/v1/accounts/transfer").contentType(MediaType.APPLICATION_JSON)
+            .content(asJson(operation))).andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void transfer() throws Exception {
+    var from = createAccount(new BigDecimal(100));
+    var to = createAccount(new BigDecimal(50));
+    var operation = new TransferOperation(from.getAccountId(), to.getAccountId(), new BigDecimal(50));
+
+    this.mockMvc.perform(post("/v1/accounts/transfer").contentType(MediaType.APPLICATION_JSON)
+            .content(asJson(operation))).andExpect(status().isOk());
+  }
+
+  @Test
+  void insufficientBalanceTransfer() throws Exception {
+    var from = createAccount(new BigDecimal(0));
+    var to = createAccount(new BigDecimal(50));
+    var operation = new TransferOperation(from.getAccountId(), to.getAccountId(), new BigDecimal(50));
+
+    this.mockMvc.perform(post("/v1/accounts/transfer").contentType(MediaType.APPLICATION_JSON)
+            .content(asJson(operation))).andExpect(status().isUnprocessableEntity());
+  }
+
+  private Account createAccount(BigDecimal balance) {
+    String uniqueId = UUID.randomUUID().toString();
+    Account account = new Account(uniqueId);
+    account.setBalance(balance);
+    this.accountsService.createAccount(account);
+    return account;
+  }
+
+  private String asJson(Object object) throws JsonProcessingException {
+    return objectMapper.writeValueAsString(object);
   }
 }
